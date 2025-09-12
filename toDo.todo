@@ -1,0 +1,79 @@
+Docker Hub:
+    Créer un compte docker-hub
+    (Créer un repository pour chaque microservice? i dont know if it's necessary)
+    Pusher les images de conteneurs dans docker-hub
+
+Dockerfiles : 
+    contient les codes et Dockerfiles de chaque microservice à pull)
+
+Manifests:
+    api-gateway-app (api-gateway-app.yaml):
+        création :
+            d'un service de type ingress
+            d'un service de type ClusterIP(?) 
+            d'un déploiement de type deployment(max replication: 3 min replication: 1 )
+            d'un configmap pour les configurations de l'application
+            d'un horizontalpodautoscaler pour l'application (CPU percent trigger: 60%)
+            (un volume pour les logs peut etre)
+
+    inventory-app (inventory-app.yaml):
+        création :
+            d'un service de type ClusterIP
+            d'un déploiement de type deployment(max replication: 3 min replication: 1 )
+            d'un configmap pour les configurations de l'application
+            d'un horizontalpodautoscaler pour l'application (CPU percent trigger: 60%)
+            (un volume pour les logs peut etre)
+    inventory-db (inventory-db.yaml):
+        création :
+            d'un service de type ClusterIP
+            d'un déploiement de type statefulset
+            un volume persistant pour les données
+
+    billing-app (billing-app.yaml):
+        création :
+            d'un service de type ClusterIP
+            d'un déploiement de type statefulset
+            d'un configmap pour les configurations de l'application
+            d'un horizontalpodautoscaler pour l'application (CPU percent trigger: 60%)
+            (un volume pour les logs peut etre)
+
+    billing-db (billing-db.yaml):
+        création :
+            d'un service de type ClusterIP
+            d'un déploiement de type statefulset
+            un volume persistant pour les données
+            d'un configmap pour les configurations de l'application
+
+    rabbitmq (rabbitmq.yaml):
+        création :
+            d'un service de type ClusterIP
+            d'un déploiement de type statefulset
+            un volume persistant pour les données(maybe)
+            d'un configmap pour les configurations de l'application
+
+    Secrets et ConfigMaps:
+        creer des secrets pour les credentials des bases de données et rabbitmq
+        creer des configmaps pour les configurations des microservices
+
+Vagrantfile:
+    Configuration de deux VMs ubuntu 22.04 (l'un master et l'autre worker)
+    Configuration du reseau entre les VMs et la machine hote?
+    Configuration du partage de dossier entre les VMs et la machine hote
+
+Scripts:
+    install_kubectl.sh:
+        Installer kubectl sur la machine hote
+        Configurer kubectl pour qu'il puisse communiquer avec le cluster k3s
+    install_k3s_master.sh et install_k3s_worker.sh :
+        Installer k3s sur une VM ubuntu 22.04 (master ou worker)
+    orchestrator.sh:
+        Créer, démarrer, arrêter et supprimer le cluster kubernetes en se basant sur les arguments passés en ligne de commande
+        (optionnel: afficher l'état du cluster kubernetes)
+        
+                
+readme.md:
+    prerequisites
+    configuration
+    setup
+    usage
+    ...etc

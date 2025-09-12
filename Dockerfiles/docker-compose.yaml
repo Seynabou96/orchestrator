@@ -1,0 +1,160 @@
+services:
+    inventory-database:
+        build:
+            context: ./srcs/inventory-database
+        image: inventory-database
+        container_name: inventory-database
+        restart: on-failure 
+        environment:
+            POSTGRES_USER: "${INV_USER}"
+            POSTGRES_PASSWORD: "${INV_PASSWORD}"
+            POSTGRES_DB: "${MOVIES_DB}"     
+        expose:
+          - "5432"
+        networks:
+            - app-network
+        volumes:
+            - inventory-database:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${INV_USER} -d ${MOVIES_DB}"]
+            interval: 5s
+            timeout: 5s
+            retries: 10   
+
+
+
+    billing-database:
+        build:
+            context: ./srcs/billing-database
+        image: billing-database
+        container_name: billing-database   
+        expose:
+          - "5432"
+        restart: on-failure
+        environment:
+            POSTGRES_USER: "${BILLING_USER}"
+            POSTGRES_PASSWORD: "${BILLING_PASSWORD}"
+            POSTGRES_DB: "${BILLING_DB}"  
+
+        networks:
+            - app-network 
+        volumes:
+            - billing-database:/var/lib/postgresql/data        
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${BILLING_USER} -d ${BILLING_DB}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5             
+            
+
+
+    inventory-app:
+        build:
+            context: ./srcs/inventory-app
+        image: inventory-app    
+        container_name: inventory-app
+        expose:
+            - "8080"
+        restart: on-failure  
+        env_file:
+            - .env
+        depends_on: 
+            inventory-database:
+                condition: service_healthy    
+
+        networks:
+            - app-network
+        healthcheck:
+            test: ["CMD", "python3", "healthcheck.py"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
+
+
+    rabbitmq :
+        build:
+            context: ./srcs/rabbitMQ
+        image: rabbitmq
+        container_name: rabbitmq
+        expose:
+            - "5672"
+        restart: on-failure  
+        env_file:
+            - .env
+        environment:
+            RABBITMQ_USER: "${RABBITMQ_USER}"
+            RABBITMQ_PASSWORD: "${RABBITMQ_PASSWORD}"           
+        networks:
+            - app-network
+
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 60s  
+
+    billing-app:
+        build:
+            context: "./srcs/billing-app"
+        image: billing-app    
+        container_name: billing-app
+        expose:
+            - "8080"
+        restart: on-failure
+        env_file:
+            - .env
+        depends_on: 
+            billing-database:
+                condition: service_healthy
+            rabbitmq :
+                condition: service_healthy
+        networks:
+            - app-network 
+        healthcheck:
+            test: ["CMD", "python3", "healthcheck.py"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
+              
+
+
+
+    api-gateway-app:
+        build:
+            context: ./srcs/api-gateway
+        image: api-gateway-app   
+        container_name: api-gateway-app
+        ports:
+            - "3000:3000"
+        restart: on-failure
+        env_file:
+            - .env
+        depends_on: 
+            inventory-app:
+                condition: service_healthy
+            billing-app:
+                condition: service_healthy
+        networks:
+            - app-network
+
+        volumes:
+            - api-gateway-app:/var/lib/api_gateway_app/logs
+        
+
+
+
+volumes:
+    inventory-database:
+        name: inventory-database
+    billing-database:
+        name: billing-database
+    api-gateway-app:
+        name: api-gateway-app
+
+networks:
+    app-network:
+
+     
