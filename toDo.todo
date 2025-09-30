@@ -4,13 +4,12 @@ Docker Hub:
     Pusher les images de conteneurs dans docker-hub
 
 Dockerfiles : 
-    contient les codes et Dockerfiles de chaque microservice à pull)
+    contient les codes et Dockerfiles de chaque microservice à pull
 
 Manifests:
     api-gateway-app (api-gateway-app.yaml):
         création :
-            d'un service de type ingress
-            d'un service de type ClusterIP(?) 
+            d'un service de type loadbalancer
             d'un déploiement de type deployment(max replication: 3 min replication: 1 )
             d'un configmap pour les configurations de l'application
             d'un horizontalpodautoscaler pour l'application (CPU percent trigger: 60%)
