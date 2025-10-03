@@ -1,0 +1,18 @@
+# Vagrant
+.vagrant/
+*.log
+
+# K3s generated files
+node-token
+kubeconfig.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
