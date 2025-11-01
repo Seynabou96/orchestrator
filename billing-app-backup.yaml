@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"annotations":{},"name":"billing-app","namespace":"default"},"spec":{"replicas":1,"selector":{"matchLabels":{"app":"billing-app"}},"serviceName":"billing-app","template":{"metadata":{"labels":{"app":"billing-app"}},"spec":{"containers":[{"env":[{"name":"BILLING_DB_URL","valueFrom":{"secretKeyRef":{"key":"BILLING_DB_URL","name":"billing-app-secret"}}},{"name":"RABBITMQ_URL","valueFrom":{"secretKeyRef":{"key":"RABBITMQ_URL","name":"billing-app-secret"}}},{"name":"RABBITMQ_QUEUE","value":"billing_queue"},{"name":"RABBITMQ_HOST","value":"rabbitmq"},{"name":"RABBITMQ_PORT","value":"5672"},{"name":"RABBITMQ_USER","value":"sdiene"},{"name":"RABBITMQ_PASSWORD","valueFrom":{"secretKeyRef":{"key":"RABBITMQ_PASSWORD","name":"billing-app-secret"}}}],"image":"talibedev/play-with-container-billing-app:v1","livenessProbe":{"failureThreshold":3,"httpGet":{"path":"/health","port":8080},"initialDelaySeconds":30,"periodSeconds":10,"timeoutSeconds":5},"name":"billing-app","ports":[{"containerPort":8080,"name":"http"}],"readinessProbe":{"failureThreshold":3,"httpGet":{"path":"/health","port":8080},"initialDelaySeconds":10,"periodSeconds":5,"timeoutSeconds":5},"resources":{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"200m","memory":"256Mi"}}}]}}}}
+  creationTimestamp: "2025-10-15T08:28:37Z"
+  generation: 2
+  name: billing-app
+  namespace: default
+  resourceVersion: "37629"
+  uid: 4993c739-b01d-4979-824a-8b908c2721e8
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: billing-app
+  serviceName: billing-app
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: billing-app
+    spec:
+      containers:
+      - env:
+        - name: BILLING_DB_URL
+          valueFrom:
+            secretKeyRef:
+              key: BILLING_DB_URL
+              name: billing-app-secret
+        - name: RABBITMQ_URL
+          valueFrom:
+            secretKeyRef:
+              key: RABBITMQ_URL
+              name: billing-app-secret
+        - name: RABBITMQ_QUEUE
+          value: billing_queue
+        - name: RABBITMQ_HOST
+          value: rabbitmq
+        - name: RABBITMQ_PORT
+          value: "5672"
+        - name: RABBITMQ_USER
+          value: sdiene
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: RABBITMQ_PASSWORD
+              name: billing-app-secret
+        image: talibedev/play-with-container-billing-app:v1
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: billing-app
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+status:
+  availableReplicas: 0
+  collisionCount: 0
+  currentRevision: billing-app-564bd6b9d
+  observedGeneration: 2
+  replicas: 1
+  updateRevision: billing-app-5cf5f6757b
+  updatedReplicas: 1

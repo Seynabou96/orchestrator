@@ -4,15 +4,8 @@
 
 # K3s generated files
 node-token
-kubeconfig.yaml
+kubeconfig
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# Editor files
-*.swp
-*.swo
-*~
-.vscode/
-.idea/

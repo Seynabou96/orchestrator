@@ -77,7 +77,7 @@ Vagrant.configure("2") do |config|
   # Configuration du Master Node
   config.vm.define "master" do |master|
     master.vm.hostname = "masterS"
-    master.vm.network "private_network", ip: "192.168.56.110"
+    master.vm.network "private_network", ip: "192.168.56.10"
     
     master.vm.provider "virtualbox" do |vb|
       vb.name = "master"
@@ -96,8 +96,8 @@ Vagrant.configure("2") do |config|
       sudo cat /var/lib/rancher/k3s/server/node-token > /vagrant/node-token
       
       # Copier le kubeconfig pour kubectl
-      sudo cat /etc/rancher/k3s/k3s.yaml > /vagrant/kubeconfig.yaml
-      sudo sed -i 's/127.0.0.1/192.168.56.110/g' /vagrant/kubeconfig.yaml
+      sudo cat /etc/rancher/k3s/k3s.yaml > /vagrant/kubeconfig
+      sudo sed -i 's/127.0.0.1/192.168.56.10/g' /vagrant/kubeconfig
       
       echo "Master node configuré avec succès"
     SHELL
@@ -106,7 +106,7 @@ Vagrant.configure("2") do |config|
   # Configuration de l'Agent Node
   config.vm.define "agent" do |agent|
     agent.vm.hostname = "agentS"
-    agent.vm.network "private_network", ip: "192.168.56.111"
+    agent.vm.network "private_network", ip: "192.168.56.11"
     
     agent.vm.provider "virtualbox" do |vb|
       vb.name = "agent"
@@ -124,7 +124,7 @@ Vagrant.configure("2") do |config|
       TOKEN=$(cat /vagrant/node-token)
       
       # Installation de K3s en mode agent
-      curl -sfL https://get.k3s.io | K3S_URL=https://192.168.56.110:6443 K3S_TOKEN=$TOKEN INSTALL_K3S_EXEC="agent --node-name=agentS --flannel-iface=eth1" sh -
+      curl -sfL https://get.k3s.io | K3S_URL=https://192.168.56.10:6443 K3S_TOKEN=$TOKEN INSTALL_K3S_EXEC="agent --node-name=agentS --flannel-iface=eth1" sh -
       
       echo "Agent node configuré avec succès"
     SHELL
