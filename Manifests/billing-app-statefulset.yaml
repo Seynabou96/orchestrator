@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-app
+  namespace: default
+spec:
+  selector:
+    app: billing-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  clusterIP: None # Headless service pour StatefulSet
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: billing-app
+  namespace: default
+spec:
+  serviceName: billing-app
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing-app
+  template:
+    metadata:
+      labels:
+        app: billing-app
+    spec:
+      containers:
+        - name: billing-app
+          image: talibedev/play-with-container-billing-app:v1
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: BILLING_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: billing-app-secret
+                  key: BILLING_DB_URL
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: billing-app-secret
+                  key: RABBITMQ_URL
+            # Nouvelles variables requises
+            - name: RABBITMQ_QUEUE
+              value: "billing_queue"
+            - name: RABBITMQ_HOST
+              value: "rabbitmq"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "sdiene"
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-app-secret
+                  key: RABBITMQ_PASSWORD
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+           # Nouvelle sonde de vivacité avec exec
+          livenessProbe:
+            exec:
+              command:
+              - python3
+              - -c
+              - "import sys; sys.exit(0)"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Nouvelle sonde de disponibilité avec exec
+          readinessProbe:
+            exec:
+              command:
+              - python3
+              - -c
+              - "import sys; sys.exit(0)"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3

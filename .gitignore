@@ -1,0 +1,11 @@
+# Vagrant
+.vagrant/
+*.log
+
+# K3s generated files
+node-token
+kubeconfig
+
+# OS files
+.DS_Store
+Thumbs.db
