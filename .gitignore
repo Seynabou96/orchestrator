@@ -9,3 +9,9 @@ kubeconfig
 # OS files
 .DS_Store
 Thumbs.db
+
+#files
+.env
+./Manifests/apps-secrets.yaml
+billing-app-backup.yaml
+deploy-and-test.sh

@@ -1,0 +1,181 @@
+# ConfigMap spécifique à l'api-gateway
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: default
+  labels:
+    app: api-gateway
+    component: configuration
+data:
+  EXPOSED_PORT: "3000"
+  INVENTORY_API_URL: "http://inventory-app-service:8080"
+  BILLING_API_URL: "http://billing-app-service:8080"
+
+---
+# Deployment pour l'api-gateway
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-deployment
+  namespace: default
+  labels:
+    app: api-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      
+      # GESTION DES DÉPENDANCES - Attente des apps backend
+      initContainers:
+      - name: wait-for-billing-app
+        image: busybox
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Attente de billing-app..."
+          until wget -q -O- http://billing-app-service:8080 2>&1 | grep -q .; do
+            echo "billing-app service pas prêt..."
+            sleep 5
+          done
+          echo "billing-app service prêt!"
+      
+      - name: wait-for-inventory-app
+        image: busybox
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Attente de inventory-app..."
+          until wget -q -O- http://inventory-app-service:8080 2>&1 | grep -q .; do
+            echo "inventory-app service pas prêt..."
+            sleep 5
+          done
+          echo "inventory-app service prêt!"
+      
+      containers:
+      - name: api-gateway
+        image: talibedev/play-with-container-api-gateway:v1
+        ports:
+        - containerPort: 3000
+        
+        envFrom:
+        - secretRef:
+            name: rabbitmq-credentials
+        - secretRef:
+            name: inventory-db-credentials  
+        - secretRef:
+            name: billing-db-credentials
+        - configMapRef:
+            name: api-gateway-config
+        - configMapRef:
+            name: rabbitmq-config
+        - configMapRef:
+            name: inventory-db-config
+        - configMapRef:
+            name: billing-db-config
+        
+        resources:
+          requests:
+            cpu: 150m
+            memory: 200Mi
+          limits:
+            cpu: 300m
+            memory: 400Mi
+        
+        # HEALTHCHECKS - Dépendances validées par InitContainers
+        startupProbe:
+          tcpSocket:
+            port: 3000
+          initialDelaySeconds: 15
+          failureThreshold: 20
+          periodSeconds: 5
+        
+        livenessProbe:
+          tcpSocket:
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        
+        readinessProbe:
+          tcpSocket:
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 5
+        
+        volumeMounts:
+        - name: logs-volume
+          mountPath: /var/lib/api_gateway_app/logs
+      
+      volumes:
+      - name: logs-volume
+        emptyDir: {}
+
+---
+# Service LoadBalancer pour exposer l'api-gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-service
+  namespace: default
+  labels:
+    app: api-gateway
+    component: service
+spec:
+  selector:
+    app: api-gateway
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+    protocol: TCP
+  type: LoadBalancer
+
+---
+# HorizontalPodAutoscaler pour l'api-gateway
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway-deployment
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15

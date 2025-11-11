@@ -1,0 +1,129 @@
+# Service pour le inventory-database
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-database-service
+  namespace: default
+  labels:
+    app: inventory-database
+    component: service
+spec:
+  selector:
+    app: inventory-database
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+  type: ClusterIP
+
+---
+# StatefulSet pour le inventory-database
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: inventory-database
+  namespace: default
+  labels:
+    app: inventory-database
+    component: statefulset
+spec:
+  serviceName: "inventory-database-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-database
+  template:
+    metadata:
+      labels:
+        app: inventory-database
+    spec:
+      initContainers:
+      - name: volume-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 101:102 /var/lib/postgresql/data && chmod 700 /var/lib/postgresql/data"]
+        volumeMounts:
+        - name: inventory-db-storage
+          mountPath: /var/lib/postgresql/data
+        securityContext:
+          runAsUser: 0
+      containers:
+      - name: inventory-database
+        image: sniang96/inventory-database:orchestrator
+        securityContext:
+          runAsUser: 101    # postgres user ID in Debian
+          runAsGroup: 102   # postgres group ID in Debian
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: inventory-db-storage
+          mountPath: /var/lib/postgresql/data
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: inventory-db-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: inventory-db-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: inventory-db-config
+              key: POSTGRES_DB
+        - name: INVENTORY_DB
+          valueFrom:
+            configMapKeyRef:
+              name: inventory-db-config
+              key: INVENTORY_DB
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: inventory-db-config
+              key: POSTGRES_PORT
+        - name: INVENTORY_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: inventory-db-config
+              key: INVENTORY_DB_HOST
+        livenessProbe:
+          exec:
+            command:
+              - pg_isready
+              - "-U"
+              - "$(POSTGRES_USER)"
+          failureThreshold: 10
+          periodSeconds: 10
+          initialDelaySeconds: 30
+        readinessProbe:
+          exec:
+            command:
+              - pg_isready
+              - "-U"
+              - "$(POSTGRES_USER)"
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        startupProbe:
+          exec:
+            command:
+              - pg_isready
+              - "-U"
+              - "$(POSTGRES_USER)"
+          failureThreshold: 40
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: inventory-db-storage
+      namespace: default
+      labels:
+        app: inventory-database
+        component: storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 200Mi
+      storageClassName: "local-path"
