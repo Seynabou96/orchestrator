@@ -463,7 +463,8 @@ cat dashboard-token.txt
 
 ## 👥 Contributeurs
 
-Projet réalisé dans le cadre du cursus DevOps - Orchestrator
+- 👤**sniang**: [Profile](https://learn.zone01dakar.sn/git/sniang)
+- 👤**sdiene**: [Profile](https://learn.zone01dakar.sn/git/sdiene)
 
 ---
 
