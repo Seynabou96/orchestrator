@@ -1,17 +1,16 @@
 # Vagrant
 .vagrant/
 *.log
-
 # K3s generated files
 node-token
 kubeconfig
-
 # OS files
 .DS_Store
 Thumbs.db
-
 #files
 .env
-./Manifests/apps-secrets.yaml
 billing-app-backup.yaml
 deploy-and-test.sh
+# Dashbord
+dashboard-token.txt
+.dashboard-proxy.pid
