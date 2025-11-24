@@ -37,6 +37,172 @@ wait_for_pods() {
     }
 }
 
+# Fonction pour ouvrir une URL dans le navigateur par défaut
+open_browser() {
+    local url=$1
+    if command -v xdg-open &> /dev/null; then
+        xdg-open "$url" &>/dev/null &
+    elif command -v open &> /dev/null; then
+        open "$url" &>/dev/null &
+    elif command -v start &> /dev/null; then
+        start "$url" &>/dev/null &
+    else
+        log_warning "Impossible d'ouvrir automatiquement le navigateur"
+        log_info "Ouvrez manuellement: $url"
+    fi
+}
+
+# Fonction pour déployer le dashboard Kubernetes
+deploy_dashboard() {
+    log_step "=== DÉPLOIEMENT DU KUBERNETES DASHBOARD ==="
+    
+    # Vérifier que kubectl fonctionne
+    if ! kubectl get nodes &>/dev/null; then
+        log_error "kubectl ne peut pas se connecter au cluster"
+        exit 1
+    fi
+    
+    # 1. Déployer le dashboard
+    log_info "📊 Déploiement du Kubernetes Dashboard..."
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+    
+    # Attendre que le dashboard soit déployé
+    log_info "Attente du déploiement du dashboard..."
+    sleep 10
+    wait_for_pods "k8s-app=kubernetes-dashboard" 180 -n kubernetes-dashboard
+    
+    # 2. Créer le compte service admin
+    log_info "👤 Création du compte service admin..."
+    
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+  namespace: kubernetes-dashboard
+EOF
+    
+    sleep 5
+    
+    # 3. Obtenir le token d'accès
+    log_info "🔑 Génération du token d'accès..."
+    
+    # Créer un token pour le service account
+    TOKEN=$(kubectl -n kubernetes-dashboard create token admin-user 2>/dev/null)
+    
+    if [ -z "$TOKEN" ]; then
+        log_warning "Impossible de créer un token avec 'create token', utilisation de la méthode alternative..."
+        # Méthode alternative pour les anciennes versions
+        SECRET_NAME=$(kubectl -n kubernetes-dashboard get serviceaccount admin-user -o jsonpath='{.secrets[0].name}' 2>/dev/null)
+        if [ -n "$SECRET_NAME" ]; then
+            TOKEN=$(kubectl -n kubernetes-dashboard get secret $SECRET_NAME -o jsonpath='{.data.token}' | base64 -d)
+        fi
+    fi
+    
+    # Sauvegarder le token dans un fichier
+    echo "$TOKEN" > dashboard-token.txt
+    
+    echo ""
+    log_info "✅ Dashboard déployé avec succès!"
+    echo ""
+    log_step "=== INFORMATIONS D'ACCÈS AU DASHBOARD ==="
+    echo ""
+    log_info "📝 Token d'accès (sauvegardé dans dashboard-token.txt):"
+    echo ""
+    echo "$TOKEN"
+    echo ""
+    log_info "🌐 Le token a été copié dans votre presse-papiers (si xclip/pbcopy disponible)"
+    
+    # Copier le token dans le presse-papiers
+    if command -v xclip &> /dev/null; then
+        echo -n "$TOKEN" | xclip -selection clipboard 2>/dev/null && log_info "✓ Token copié (Linux - xclip)"
+    elif command -v pbcopy &> /dev/null; then
+        echo -n "$TOKEN" | pbcopy 2>/dev/null && log_info "✓ Token copié (macOS - pbcopy)"
+    elif command -v clip.exe &> /dev/null; then
+        echo -n "$TOKEN" | clip.exe 2>/dev/null && log_info "✓ Token copié (Windows WSL - clip.exe)"
+    fi
+    
+    echo ""
+    
+    # Demander si on lance automatiquement
+    read -p "Voulez-vous lancer le dashboard maintenant ? (Y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        log_info "🚀 Démarrage du proxy kubectl en arrière-plan..."
+        
+        # Tuer les anciens processus kubectl proxy
+        pkill -f "kubectl proxy" 2>/dev/null || true
+        sleep 2
+        
+        # Démarrer le proxy en arrière-plan
+        kubectl proxy &>/dev/null &
+        PROXY_PID=$!
+        echo $PROXY_PID > .dashboard-proxy.pid
+        
+        log_info "Proxy démarré (PID: $PROXY_PID)"
+        sleep 3
+        
+        # URL du dashboard
+        DASHBOARD_URL="http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/"
+        
+        log_info "🌐 Ouverture du dashboard dans le navigateur..."
+        open_browser "$DASHBOARD_URL"
+        
+        echo ""
+        log_info "✅ Dashboard ouvert! Collez le token pour vous connecter."
+        echo ""
+        log_warning "💡 Pour arrêter le proxy plus tard, utilisez:"
+        echo -e "   ${YELLOW}kill $PROXY_PID${NC}   ou   ${YELLOW}./orchestrator.sh stop-dashboard${NC}"
+        echo ""
+    else
+        echo ""
+        log_info "Pour lancer le dashboard manuellement:"
+        echo ""
+        echo "  1. Démarrez le proxy kubectl:"
+        echo -e "     ${YELLOW}kubectl proxy${NC}"
+        echo ""
+        echo "  2. Ouvrez votre navigateur à l'adresse:"
+        echo -e "     ${YELLOW}http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/${NC}"
+        echo ""
+        echo "  3. Utilisez le token sauvegardé dans dashboard-token.txt"
+        echo ""
+    fi
+}
+
+# Fonction pour arrêter le proxy du dashboard
+stop_dashboard_proxy() {
+    log_step "=== ARRÊT DU PROXY DASHBOARD ==="
+    
+    if [ -f ".dashboard-proxy.pid" ]; then
+        PID=$(cat .dashboard-proxy.pid)
+        if ps -p $PID > /dev/null 2>&1; then
+            log_info "Arrêt du proxy (PID: $PID)..."
+            kill $PID 2>/dev/null || true
+            rm -f .dashboard-proxy.pid
+            log_info "✅ Proxy arrêté"
+        else
+            log_warning "Le processus n'est plus actif"
+            rm -f .dashboard-proxy.pid
+        fi
+    else
+        log_warning "Aucun fichier PID trouvé, tentative d'arrêt de tous les kubectl proxy..."
+        pkill -f "kubectl proxy" 2>/dev/null && log_info "✅ Proxy(s) arrêté(s)" || log_warning "Aucun proxy actif trouvé"
+    fi
+}
+
 # Fonction create - Création du cluster
 create_cluster() {
     log_step "=== CRÉATION DU CLUSTER K3S ==="
@@ -171,6 +337,13 @@ start_cluster() {
     log_info "Attente que l'API Gateway soit prêt..."
     wait_for_pods "app=api-gateway" 300
     
+    # 6. Dashboard Kubernetes
+    read -p "Voulez-vous déployer le Kubernetes Dashboard ? (Y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        deploy_dashboard
+    fi
+    
     echo ""
     log_info "✅ Cluster démarré et toutes les ressources déployées"
     echo ""
@@ -223,6 +396,16 @@ stop_cluster() {
     log_info "Arrêt des VMs Vagrant..."
     vagrant halt
     
+    # Arrêter le proxy du dashboard s'il est actif
+    if [ -f ".dashboard-proxy.pid" ]; then
+        PID=$(cat .dashboard-proxy.pid)
+        if ps -p $PID > /dev/null 2>&1; then
+            log_info "Arrêt du proxy dashboard..."
+            kill $PID 2>/dev/null || true
+            rm -f .dashboard-proxy.pid
+        fi
+    fi
+    
     log_info "✅ Cluster arrêté"
 }
 
@@ -242,15 +425,23 @@ delete_cluster() {
     if kubectl get nodes &>/dev/null 2>&1; then
         log_info "Suppression des ressources Kubernetes..."
         kubectl delete all,pvc,secrets,configmaps --all --ignore-not-found=true 2>/dev/null || true
+        kubectl delete namespace kubernetes-dashboard --ignore-not-found=true 2>/dev/null || true
     fi
     
     # Destruction des VMs
     log_info "Destruction des VMs Vagrant..."
     vagrant destroy -f
     
+    # Arrêter le proxy du dashboard s'il est actif
+    if [ -f ".dashboard-proxy.pid" ]; then
+        PID=$(cat .dashboard-proxy.pid)
+        kill $PID 2>/dev/null || true
+    fi
+    pkill -f "kubectl proxy" 2>/dev/null || true
+    
     # Nettoyage des fichiers locaux
     log_info "Nettoyage des fichiers de configuration..."
-    rm -f kubeconfig node-token
+    rm -f kubeconfig node-token dashboard-token.txt .dashboard-proxy.pid
     
     log_info "✅ Cluster supprimé"
 }
@@ -271,12 +462,23 @@ status_cluster() {
         kubectl get nodes -o wide
         
         echo ""
-        log_info "Pods:"
+        log_info "Pods (namespace default):"
         kubectl get pods -o wide
         
         echo ""
-        log_info "Services:"
+        log_info "Services (namespace default):"
         kubectl get services
+        
+        # Vérifier si le dashboard est déployé
+        if kubectl get namespace kubernetes-dashboard &>/dev/null 2>&1; then
+            echo ""
+            log_info "Dashboard Kubernetes:"
+            kubectl get pods -n kubernetes-dashboard
+            echo ""
+            if [ -f "dashboard-token.txt" ]; then
+                log_info "Token du dashboard disponible dans: dashboard-token.txt"
+            fi
+        fi
     else
         log_warning "kubectl non configuré ou cluster non accessible"
     fi
@@ -290,18 +492,25 @@ Usage: ./orchestrator.sh [COMMAND]
 Gestion du cluster K3s pour le projet orchestrator
 
 Commandes:
-  create    Crée le cluster K3s avec Vagrant
-  start     Démarre le cluster et déploie toutes les ressources
-  stop      Arrête le cluster proprement
-  delete    Supprime complètement le cluster et ses données
-  status    Affiche l'état du cluster
-  help      Affiche cette aide
+  create          Crée le cluster K3s avec Vagrant
+  start           Démarre le cluster et déploie toutes les ressources
+  stop            Arrête le cluster proprement
+  delete          Supprime complètement le cluster et ses données
+  status          Affiche l'état du cluster
+  dashboard       Déploie le Kubernetes Dashboard et l'ouvre dans le navigateur
+  stop-dashboard  Arrête le proxy du dashboard
+  help            Affiche cette aide
 
 Exemples:
-  ./orchestrator.sh create   # Créer le cluster
-  ./orchestrator.sh start    # Démarrer et déployer
-  ./orchestrator.sh stop     # Arrêter
-  ./orchestrator.sh delete   # Supprimer tout
+  ./orchestrator.sh create          # Créer le cluster
+  ./orchestrator.sh start           # Démarrer et déployer (inclut option dashboard)
+  ./orchestrator.sh dashboard       # Déployer et ouvrir le dashboard
+  ./orchestrator.sh stop-dashboard  # Arrêter le proxy du dashboard
+  ./orchestrator.sh stop            # Arrêter
+  ./orchestrator.sh delete          # Supprimer tout
+
+Note: Le dashboard s'ouvre automatiquement dans votre navigateur avec le token
+      copié dans le presse-papiers (si disponible)
 
 EOF
 }
@@ -322,6 +531,12 @@ case "${1:-}" in
         ;;
     status)
         status_cluster
+        ;;
+    dashboard)
+        deploy_dashboard
+        ;;
+    stop-dashboard)
+        stop_dashboard_proxy
         ;;
     help|--help|-h)
         show_help

@@ -388,9 +388,53 @@ kubectl top pods
 kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes
 ```
 
-### Dashboard Kubernetes (optionnel)
+### 📊 Dashboard Kubernetes (optionnel)
 
-(à voir )
+Le script inclut le déploiement automatique du Kubernetes Dashboard pour une gestion visuelle du cluster.
+
+### Déploiement automatique
+```bash
+./orchestrator.sh dashboard
+```
+
+**Ce qui se passe automatiquement :**
+- ✅ Déploiement du Kubernetes Dashboard
+- ✅ Création du compte admin avec les permissions nécessaires
+- ✅ Génération du token d'accès (sauvegardé dans `dashboard-token.txt`)
+- ✅ Copie du token dans le presse-papiers
+- ✅ Lancement du proxy kubectl en arrière-plan
+- ✅ Ouverture automatique dans votre navigateur par défaut
+
+### Accès au Dashboard
+
+Une fois le navigateur ouvert, **collez simplement le token** (Ctrl+V / Cmd+V) pour vous connecter.
+
+Le token est disponible dans :
+- Votre presse-papiers (copié automatiquement)
+- Le fichier `dashboard-token.txt`
+
+### Gestion du Dashboard
+```bash
+# Arrêter le proxy
+./orchestrator.sh stop-dashboard
+
+# Le dashboard est également proposé lors du démarrage
+./orchestrator.sh start  # Répond "Y" pour inclure le dashboard
+```
+
+### Accès manuel (si nécessaire)
+```bash
+# 1. Démarrer le proxy
+kubectl proxy
+
+# 2. Accéder à l'URL
+http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
+
+# 3. Utiliser le token du fichier dashboard-token.txt
+cat dashboard-token.txt
+```
+
+> **Note :** Le proxy tourne en arrière-plan et s'arrête automatiquement avec `./orchestrator.sh stop` ou `./orchestrator.sh delete`
 
 ---
 
