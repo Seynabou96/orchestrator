@@ -115,7 +115,7 @@ vm_stat  # macOS
 ### 1. Cloner le projet
 
 ```bash
-git clone git@github.com:Seynabou96/orchestrator.git
+git clone https://github.com/Seynabou96/orchestrator.git
 cd orchestrator
 ```
 
