@@ -1,0 +1,32 @@
+apiVersion: v2
+name: monitoring
+description: >
+  Wrapper autour des charts officiels kube-prometheus-stack (Prometheus
+  + Grafana + Alertmanager) et Loki + Grafana Alloy (logs), avec des
+  valeurs adaptées à un cluster K3s local de 2 VMs (8 Go RAM total, pas
+  les valeurs "production" de la doc officielle).
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: kube-prometheus-stack
+    # Le chart officiel publie très fréquemment (plusieurs versions par
+    # semaine). ">=65.0.0" fixe juste un plancher raisonnable plutôt
+    # qu'une version exacte qui serait vite obsolète. Avant le premier
+    # "helm dependency update", vérifier la dernière version réelle
+    # avec : helm search repo prometheus-community/kube-prometheus-stack
+    version: ">=65.0.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+  - name: loki
+    # Mode Monolithic (renommé depuis SingleBinary en v12+) — un seul
+    # binaire, stockage filesystem local, pas de S3/MinIO. Recommandé
+    # par la doc officielle pour un "petit système de meta-monitoring"
+    # (< 20 Go logs/jour), exactement notre cas.
+    version: ">=6.0.0"
+    repository: "https://grafana.github.io/helm-charts"
+  - name: alloy
+    # Remplaçant officiel de Promtail (EOL depuis le 2 mars 2026).
+    # Collecte les logs des pods (DaemonSet, un par nœud) et les
+    # transmet à Loki.
+    version: ">=0.10.0"
+    repository: "https://grafana.github.io/helm-charts"

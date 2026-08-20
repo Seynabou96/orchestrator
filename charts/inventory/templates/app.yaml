@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-app-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: inventory-app
+    component: service
+spec:
+  selector:
+    app: inventory-app
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: {{ .Values.app.service.port }}
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-app-deployment
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: inventory-app
+spec:
+  replicas: {{ .Values.app.hpa.minReplicas }}
+  selector:
+    matchLabels:
+      app: inventory-app
+  template:
+    metadata:
+      labels:
+        app: inventory-app
+    spec:
+      initContainers:
+        - name: wait-for-database
+          image: busybox
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Attente de inventory-database-service:{{ .Values.database.service.port }}..."
+              until nc -z inventory-database-service {{ .Values.database.service.port }}; do
+                echo "PostgreSQL pas encore prêt..."
+                sleep 3
+              done
+              echo "PostgreSQL prêt."
+      containers:
+        - name: inventory-app
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.app.service.port }}
+          envFrom:
+            - secretRef:
+                name: inventory-db-credentials
+            - configMapRef:
+                name: inventory-db-config
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inventory-app-hpa
+  namespace: {{ .Values.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inventory-app-deployment
+  minReplicas: {{ .Values.app.hpa.minReplicas }}
+  maxReplicas: {{ .Values.app.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.app.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15

@@ -1,0 +1,83 @@
+# =============================================================================
+# NetworkPolicy — namespace billing
+#
+# Mêmes principes que inventory/templates/networkpolicy.yaml : deny-all
+# ingress par défaut, puis autorisations explicites flux par flux. Pas
+# de policy Egress (voir note dans inventory/templates/networkpolicy.yaml
+# sur pourquoi ça casserait les flux sortants légitimes).
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: billing
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# billing-database n'accepte du trafic QUE depuis billing-app (même
+# namespace).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-billing-app-to-db
+  namespace: billing
+spec:
+  podSelector:
+    matchLabels:
+      app: billing-database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: billing-app
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# rabbitmq accepte du trafic depuis billing-app (même namespace, le
+# consumer) ET depuis api-gateway (namespace différent, le publisher).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-access
+  namespace: billing
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: billing-app
+      ports:
+        - protocol: TCP
+          port: 5672
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              team: api-gateway
+          podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 5672
+
+---
+# billing-app n'a pas besoin d'accepter de trafic entrant (il ne reçoit
+# pas de requêtes HTTP — il consomme RabbitMQ et écrit en base, mais ne
+# sert pas d'API consultée directement). On le laisse donc soumis au
+# default-deny-ingress sans règle "allow" dédiée : aucun pod ne devrait
+# avoir besoin de lui parler en entrant. Si jamais un besoin de
+# debug/health-check externe apparaît, ajouter une règle ciblée plutôt
+# que de l'exempter du deny-all.

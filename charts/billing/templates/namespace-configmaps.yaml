@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    team: {{ .Values.namespace }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-db-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: billing-database
+    component: configuration
+data:
+  POSTGRES_DB: {{ .Values.database.config.postgresDb | quote }}
+  BILLING_DB_NAME: {{ .Values.database.config.dbName | quote }}
+  BILLING_DB_PORT: {{ .Values.database.config.dbPort | quote }}
+  BILLING_DB_HOST: "billing-database-service"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: rabbitmq
+    component: configuration
+data:
+  RABBITMQ_PORT: {{ .Values.rabbitmq.service.amqpPort | quote }}
+  # Nom court : valide à l'intérieur du namespace billing. api-gateway
+  # (namespace différent) utilise rabbitmq-service.billing à la place.
+  RABBITMQ_HOST: "rabbitmq-service"

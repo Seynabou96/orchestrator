@@ -1,0 +1,54 @@
+# =============================================================================
+# values.yaml — valeurs par défaut, ciblent K3s (cluster local Vagrant).
+# Pour EKS, voir values-eks.yaml et la commande :
+#   helm install inventory ./charts/inventory -f charts/inventory/values-eks.yaml
+# =============================================================================
+
+namespace: inventory
+
+database:
+  image:
+    repository: sniang96/inventory-db
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 5432
+  resources:
+    requests:
+      cpu: 150m
+      memory: 200Mi
+    limits:
+      cpu: 300m
+      memory: 400Mi
+  storage:
+    size: 200Mi
+    # K3s utilise le provisioner local-path par défaut. Sur EKS, à
+    # remplacer par gp2/gp3 via values-eks.yaml (nécessite le driver
+    # CSI EBS — voir README cloud-design pour ce point, hors scope ici).
+    storageClassName: "local-path"
+  config:
+    postgresDb: "movies_db"
+    dbName: "movies_db"
+    dbPort: "5432"
+
+app:
+  image:
+    repository: sniang96/inventory-app
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 150m
+      memory: 200Mi
+    limits:
+      cpu: 300m
+      memory: 400Mi
+  hpa:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 60
+  probes:
+    path: /health
+    port: 8080

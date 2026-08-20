@@ -1,0 +1,13 @@
+# =============================================================================
+# values-eks.yaml — overrides pour un déploiement sur EKS (cloud-design).
+# Voir la note sur le driver CSI EBS dans charts/inventory/values-eks.yaml
+# — même remarque s'applique ici, à traiter dans le fil cloud-design.
+# =============================================================================
+
+database:
+  storage:
+    storageClassName: "gp3"
+
+rabbitmq:
+  storage:
+    storageClassName: "gp3"

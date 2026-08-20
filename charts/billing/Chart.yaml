@@ -1,0 +1,9 @@
+apiVersion: v2
+name: billing
+description: >
+  Chart Helm pour le domaine billing (billing-app + billing-database +
+  rabbitmq), namespace "billing". Fait partie du projet Orchestrator de
+  Seynabou Niang.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

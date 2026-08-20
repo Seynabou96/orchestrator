@@ -1,0 +1,264 @@
+# =============================================================================
+# values.yaml — passe les valeurs au sous-chart kube-prometheus-stack
+# (clé "kube-prometheus-stack:" obligatoire pour une dépendance Helm).
+#
+# Dimensionnement délibérément MODESTE : ce cluster a 8 Go RAM total
+# (2 VMs × 4096 Mo) pour héberger Cilium + 6 services applicatifs + ce
+# stack de monitoring. Les exemples "production" de la doc officielle
+# (50 Go de rétention, 8 Go pour Prometheus seul) ne s'appliquent pas
+# ici — ce sont des valeurs vérifiées pour un cluster nettement plus
+# petit, pas une supposition.
+# =============================================================================
+# =============================================================================
+# Désactiver le webhook d'admission qui cause le timeout
+# (le job admission-create échoue sur le cluster K3s avec Cilium)
+# =============================================================================
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+
+kube-prometheus-stack:
+  # On désactive les composants qui ne sont pas utiles sur un cluster
+  # de 2 nœuds local, pour économiser de la RAM.
+  alertmanager:
+    enabled: true
+    alertmanagerSpec:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 1Gi
+            storageClassName: "local-path"
+
+  prometheus:
+    prometheusSpec:
+      retention: "3d"  # courte rétention : cluster de dev/apprentissage,
+                        # pas un usage long terme
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 2Gi
+            storageClassName: "local-path"
+
+  grafana:
+    enabled: true
+    # Mot de passe admin par défaut du chart officiel — À CHANGER avant
+    # tout usage réel (voir README pour la procédure, ou exposer via un
+    # SealedSecret comme pour les autres credentials du projet).
+    adminPassword: "changeme"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    persistence:
+      enabled: true
+      storageClassName: "local-path"
+      size: 500Mi
+    # Pas d'Ingress ici : Grafana reste accessible via kubectl
+    # port-forward pour ce premier hands-on, plus simple à dépanner
+    # qu'un second Ingress Cilium en parallèle de celui d'api-gateway.
+    ingress:
+      enabled: false
+    # Connecte Grafana à Loki (sous-chart loki ci-dessous, même
+    # namespace monitoring). Service créé par le gateway Loki :
+    # <release>-loki-gateway, port 80 (pas 3100, voir note dans la
+    # config Alloy plus bas — comportement vérifié, pas supposé).
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://monitoring-loki-gateway.monitoring.svc.cluster.local:80
+        access: proxy
+
+  # node-exporter et kube-state-metrics restent activés (par défaut) :
+  # ce sont eux qui fournissent les métriques CPU/mémoire par pod que
+  # le plan d'optimisation veut visualiser (HPA, PVC, RabbitMQ).
+  nodeExporter:
+    enabled: true
+
+  kubeStateMetrics:
+    enabled: true
+
+  # Désactive le windows-exporter (inutile, nœuds Linux uniquement) et
+  # certains composants secondaires non nécessaires sur ce cluster.
+  windowsMonitoring:
+    enabled: false
+
+# =============================================================================
+# Loki — mode Monolithic (anciennement SingleBinary), stockage
+# filesystem local. PAS de S3/MinIO : inutile à notre échelle
+# (< 20 Go logs/jour), et MinIO est de toute façon en cours de
+# dépréciation côté chart officiel.
+# =============================================================================
+loki:
+  deploymentMode: Monolithic
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1  # obligatoire avec 1 seul replica
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+  singleBinary:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+    persistence:
+      enabled: true
+      storageClass: "local-path"
+      size: 2Gi
+  # Zéro-er les autres modes de déploiement, sinon le chart essaie de
+  # créer des composants Simple Scalable/Microservices en plus.
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  ingester:
+    replicas: 0
+  querier:
+    replicas: 0
+  queryFrontend:
+    replicas: 0
+  queryScheduler:
+    replicas: 0
+  distributor:
+    replicas: 0
+  compactor:
+    replicas: 0
+  indexGateway:
+    replicas: 0
+  # IMPORTANT (découvert après coup, pas anticipé initialement) :
+  # chunksCache et resultsCache (memcached) sont ACTIVÉS PAR DÉFAUT par
+  # le chart, même en mode Monolithic — confirmé, ce n'est pas
+  # spécifique à notre config. Sur un cluster à 8 Go RAM total, ce
+  # memcached supplémentaire n'est pas souhaitable et c'est lui qui
+  # restait bloqué en Pending (PVC en attente). Avec ces caches
+  # désactivés, Loki retombe sur un cache en mémoire (in-memory) par
+  # défaut — toujours du caching, juste plus léger.
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  # Le gateway Nginx EST nécessaire même en mode Monolithic : sans lui,
+  # aucun Service Kubernetes stable n'est garanti pour joindre le pod
+  # singleBinary (comportement vérifié, voir grafana/loki#13045 — pas
+  # juste une supposition). Coût ressources négligeable (reverse-proxy
+  # nginx léger).
+  gateway:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 20m
+        memory: 32Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+  # Pas de test canary (loki-canary) : composant de vérification
+  # continue, overhead inutile pour ce cluster d'apprentissage.
+  lokiCanary:
+    enabled: false
+  monitoring:
+    selfMonitoring:
+      enabled: false
+    lokiCanary:
+      enabled: false
+  test:
+    enabled: false
+
+# =============================================================================
+# Grafana Alloy — remplaçant officiel de Promtail (EOL 2 mars 2026).
+# DaemonSet (un pod par nœud), config minimale : découvre les pods K8s
+# et transmet leurs logs à Loki via le gateway (monitoring-loki-gateway,
+# port 80 — voir endpoint ci-dessous).
+# =============================================================================
+alloy:
+  alloy:
+    configMap:
+      # IMPORTANT (corrigé après crash réel constaté) : le contenu
+      # ci-dessous est du River (langage de config Alloy), PAS du
+      # YAML — les commentaires River utilisent // et non #. Un
+      # commentaire # à l'intérieur de ce bloc casse le parsing
+      # ("string literal not terminated", "illegal character U+0023").
+      # Erreur réelle observée : Alloy crashait en CrashLoopBackOff à
+      # cause de mes propres commentaires explicatifs écrits avec #.
+      content: |-
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        discovery.relabel "pod_logs" {
+          targets = discovery.kubernetes.pods.targets
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+        }
+
+        loki.source.kubernetes "pod_logs" {
+          targets    = discovery.relabel.pod_logs.output
+          forward_to = [loki.write.local.receiver]
+        }
+
+        // Endpoint : Service créé par le sous-chart "gateway" de Loki
+        // (nginx reverse-proxy) : <release>-loki-gateway, port 80 —
+        // PAS le port 3100 du conteneur Loki lui-même, qui n'a pas de
+        // Service Kubernetes garanti tant que le gateway est requis
+        // (comportement vérifié, voir grafana/loki#13045).
+        loki.write "local" {
+          endpoint {
+            url = "http://monitoring-loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/push"
+          }
+        }
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi

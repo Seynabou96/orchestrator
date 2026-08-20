@@ -1,0 +1,87 @@
+# =============================================================================
+# NetworkPolicy — namespace inventory
+#
+# Standard networking.k8s.io/v1 — portable EKS sans modification (le
+# concept de NetworkPolicy n'est pas spécifique à Cilium ; seul le CNI
+# qui l'applique change : Cilium ici sur K3s, VPC CNI sur EKS — voir
+# note dans values-eks.yaml de chaque chart sur l'activation côté
+# cluster EKS, qui est un sujet cloud-design, pas orchestrator).
+#
+# Stratégie : deny-all par défaut dans le namespace, puis autorisations
+# explicites flux par flux. Plus restrictif que "tout est permis sauf
+# ce qu'on bloque", ce qui est la bonne pratique sécurité standard.
+# =============================================================================
+
+# 1. Deny-all par défaut : aucun pod du namespace inventory n'accepte
+#    de trafic entrant qui ne soit pas explicitement autorisé ci-dessous.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: inventory
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 2. inventory-database n'accepte du trafic QUE depuis inventory-app
+#    (même namespace). Personne d'autre, pas même api-gateway, ne doit
+#    pouvoir parler directement à la base de données.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-inventory-app-to-db
+  namespace: inventory
+spec:
+  podSelector:
+    matchLabels:
+      app: inventory-database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: inventory-app
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# 3. inventory-app accepte du trafic UNIQUEMENT depuis api-gateway
+#    (namespace différent — d'où le namespaceSelector en plus du
+#    podSelector). C'est le seul "client" légitime d'inventory-app.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-to-inventory-app
+  namespace: inventory
+spec:
+  podSelector:
+    matchLabels:
+      app: inventory-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              team: api-gateway
+          podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# NOTE IMPORTANTE (vérifiée) : on ne déclare PAS de policy "Egress" ici.
+# Par défaut, un pod est NON isolé en egress tant qu'aucune
+# NetworkPolicy avec "Egress" dans policyTypes ne le sélectionne — donc
+# toute sortie (DNS, DB, RabbitMQ) reste permise sans rien déclarer.
+# Ajouter une policy Egress "juste pour le DNS" isolerait le pod en
+# egress et bloquerait TOUT le reste (DB, RabbitMQ) sauf le DNS — l'
+# inverse de l'effet voulu. Si une restriction egress est souhaitée
+# plus tard (partie 2 de l'optimisation), elle doit couvrir TOUS les
+# flux sortants légitimes, pas seulement le DNS.

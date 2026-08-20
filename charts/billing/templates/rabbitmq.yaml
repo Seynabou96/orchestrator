@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: rabbitmq
+    component: service
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: {{ .Values.rabbitmq.service.amqpPort }}
+      targetPort: {{ .Values.rabbitmq.service.amqpPort }}
+      protocol: TCP
+    - name: management
+      port: {{ .Values.rabbitmq.service.managementPort }}
+      targetPort: {{ .Values.rabbitmq.service.managementPort }}
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: rabbitmq
+spec:
+  serviceName: "rabbitmq-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      initContainers:
+        # Pas de privileged: true ici (vestige corrigé de l'ancienne
+        # image template) : l'image tourne déjà en USER rabbitmq.
+        - name: fix-cookie-permissions
+          image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          command: ["sh", "-c"]
+          args:
+            - |
+              RABBITMQ_UID=$(id -u rabbitmq)
+              RABBITMQ_GID=$(id -g rabbitmq)
+              echo "rabbitmq UID=$RABBITMQ_UID GID=$RABBITMQ_GID"
+              if [ -f /var/lib/rabbitmq/.erlang.cookie ]; then
+                chown "$RABBITMQ_UID:$RABBITMQ_GID" /var/lib/rabbitmq/.erlang.cookie
+                chmod 600 /var/lib/rabbitmq/.erlang.cookie
+              else
+                echo "Pas de cookie existant (premier démarrage)."
+              fi
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: rabbitmq
+          image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.rabbitmq.service.amqpPort }}
+              name: amqp
+            - containerPort: {{ .Values.rabbitmq.service.managementPort }}
+              name: management
+          envFrom:
+            - secretRef:
+                name: rabbitmq-credentials
+            - configMapRef:
+                name: rabbitmq-config
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
+          resources:
+            {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+          # Probes sur "rabbitmq-diagnostics check_running", PAS
+          # "rabbitmqctl ping" : ping ne vérifie que le runtime Erlang,
+          # pas que l'application 'rabbit' est chargée. C'est le bug
+          # documenté dans l'entrypoint de l'image elle-même.
+          startupProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_running"]
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_running"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_running"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: rabbitmq-data
+        labels:
+          app: rabbitmq
+          component: storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.rabbitmq.storage.size }}
+        storageClassName: {{ .Values.rabbitmq.storage.storageClassName | quote }}

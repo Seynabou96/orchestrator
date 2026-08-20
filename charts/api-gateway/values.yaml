@@ -1,0 +1,60 @@
+# =============================================================================
+# values.yaml — valeurs par défaut, ciblent K3s (cluster local Vagrant).
+#
+# NOTE SÉCURITÉ : contrairement aux charts inventory/ et billing/, ce
+# chart ne déclare PAS de NetworkPolicy default-deny. Raison vérifiée :
+# avec l'Ingress natif de Cilium, le trafic entrant depuis l'extérieur
+# du cluster porte une identité spéciale "reserved:ingress" (pas un
+# pod classique), distincte d'un podSelector standard. Restreindre
+# l'ingress d'api-gateway risquerait de bloquer ce trafic réservé sans
+# couvrir explicitement cette identité (nécessiterait une
+# CiliumNetworkPolicy, non portable EKS, hors scope de ce projet). La
+# protection de l'architecture se fait déjà côté inventory/ et
+# billing/, qui eux n'acceptent qu'api-gateway explicitement.
+#
+# IMPORTANT : les noms de service cross-namespace ci-dessous (inventory,
+# billing) supposent que les charts "inventory" et "billing" sont DÉJÀ
+# installés avec leurs valeurs par défaut (mêmes noms de namespace). Si
+# tu changes le nom d'un namespace dans un autre chart, mets ces valeurs
+# à jour ici aussi.
+# =============================================================================
+
+namespace: api-gateway
+
+dependencies:
+  inventory:
+    host: "inventory-app-service.inventory"
+    port: 8080
+  rabbitmq:
+    host: "rabbitmq-service.billing"
+    port: 5672
+
+app:
+  image:
+    repository: sniang96/api-gateway-app
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 3000
+  resources:
+    requests:
+      cpu: 150m
+      memory: 200Mi
+    limits:
+      cpu: 300m
+      memory: 400Mi
+  hpa:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 60
+  probes:
+    path: /health
+    port: 3000
+
+# Ingress Cilium natif : api-gateway est le SEUL point d'entrée externe
+# du cluster. Pas de Traefik (désactivé au niveau K3s), c'est
+# l'Ingress Controller intégré de Cilium qui gère ce point d'entrée.
+ingress:
+  enabled: true
+  className: cilium
+  host: "api-gateway.local"

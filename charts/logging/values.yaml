@@ -1,0 +1,130 @@
+# =============================================================================
+# values.yaml — passe les valeurs aux sous-charts Loki et Alloy.
+#
+# PIÈGE CONNU ET ÉVITÉ ICI : le chunksCache de Loki réserve 8 Go de
+# RAM par défaut (vérifié — un utilisateur réel a eu son pod bloqué en
+# "Insufficient memory" sur un petit cluster pour cette raison). On le
+# désactive explicitement ci-dessous plutôt que de le découvrir en
+# plein test.
+#
+# Storage : filesystem (PVC local-path), PAS S3/MinIO — inutile
+# d'installer un object store supplémentaire pour des logs de test sur
+# un cluster local de cette taille.
+# =============================================================================
+
+loki:
+  deploymentMode: SingleBinary
+
+  # Fixé explicitement plutôt que de dépendre de la convention du nom
+  # de release Helm — garantit que le service s'appelle "loki" (donc
+  # loki.logging.svc.cluster.local), peu importe le nom de release
+  # utilisé dans 'helm install'.
+  fullnameOverride: "loki"
+
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+    limits_config:
+      retention_period: 168h  # 7 jours, cohérent avec un usage
+                                # apprentissage/dev, pas un usage long
+                                # terme production
+
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: "local-path"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # Désactive explicitement les autres modes de déploiement (le chart
+  # refuse de s'installer si plusieurs modes ont des replicas > 0 en
+  # même temps).
+  write:
+    replicas: 0
+  read:
+    replicas: 0
+  backend:
+    replicas: 0
+
+  # PIÈGE ÉVITÉ : désactive le chunksCache (8Gi de RAM par défaut,
+  # bien trop pour ce cluster). Sans lui, Loki utilise un cache moins
+  # performant mais largement suffisant pour un volume de logs faible.
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+
+  # Pas de gateway nginx séparé : un seul binaire suffit pour ce volume,
+  # inutile d'ajouter une couche de reverse-proxy en plus.
+  gateway:
+    enabled: false
+
+  # Pas de MinIO : storage filesystem choisi ci-dessus.
+  minio:
+    enabled: false
+
+  # loki-canary (sonde de test) désactivée : utile en prod pour vérifier
+  # que le pipeline ingère bien, overkill pour ce cluster d'apprentissage.
+  lokiCanary:
+    enabled: false
+
+  test:
+    enabled: false
+
+alloy:
+  # DaemonSet par défaut : un pod Alloy par nœud (master + agent),
+  # nécessaire pour lire les logs locaux à chaque nœud.
+  controller:
+    type: daemonset
+
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    # Configuration minimale : lit les logs des pods via l'API
+    # Kubernetes (pas de mount du filesystem hôte, plus simple, moins
+    # de securityContext à gérer) et les envoie vers Loki.
+    configMap:
+      content: |-
+        logging {
+          level  = "info"
+          format = "logfmt"
+        }
+
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        loki.source.kubernetes "pod_logs" {
+          targets    = discovery.kubernetes.pods.targets
+          forward_to = [loki.write.default.receiver]
+        }
+
+        loki.write "default" {
+          endpoint {
+            url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+          }
+        }

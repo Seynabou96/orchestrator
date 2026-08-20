@@ -1,0 +1,16 @@
+# =============================================================================
+# values-eks.yaml — overrides pour un déploiement sur EKS (cloud-design).
+#
+# IMPORTANT (vérifié) : l'Ingress Cilium natif ne se transporte PAS tel
+# quel sur EKS. Sur EKS, il faut le AWS Load Balancer Controller (Helm +
+# rôle IAM) pour qu'un objet Ingress (ingressClassName: alb) crée un
+# vrai ALB. Sans ça, le className "cilium" ci-dessous n'aura aucun
+# contrôleur pour le traiter. Ce point est à traiter dans le fil
+# cloud-design, pas ici — ce fichier sert de point de départ, pas de
+# solution complète.
+# =============================================================================
+
+ingress:
+  enabled: false  # désactivé par défaut sur EKS tant que le ALB
+                   # Controller n'est pas installé côté cloud-design ;
+                   # repasser à true + className: alb une fois prêt.

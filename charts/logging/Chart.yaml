@@ -1,0 +1,18 @@
+apiVersion: v2
+name: logging
+description: >
+  Wrapper autour des charts officiels Loki (mode monolithic, storage
+  filesystem) et Grafana Alloy (collecteur de logs, remplaçant officiel
+  de Promtail — EOL depuis mars 2026). Dimensionné pour un cluster K3s
+  local de 2 VMs (8 Go RAM total, partagé avec Cilium, les 6 services
+  applicatifs et kube-prometheus-stack).
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: loki
+    version: ">=6.0.0"
+    repository: "https://grafana.github.io/helm-charts"
+  - name: alloy
+    version: ">=0.10.0"
+    repository: "https://grafana.github.io/helm-charts"

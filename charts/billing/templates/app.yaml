@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-app-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: billing-app
+    component: service
+spec:
+  selector:
+    app: billing-app
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: {{ .Values.app.service.port }}
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: billing-app
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: billing-app
+spec:
+  # StatefulSet imposé par le sujet (pas un Deployment), cohérent avec
+  # gunicorn --workers 1 (un seul worker, pas de scaling horizontal
+  # prévu pour ce service).
+  serviceName: "billing-app-service"
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      app: billing-app
+  template:
+    metadata:
+      labels:
+        app: billing-app
+    spec:
+      initContainers:
+        - name: wait-for-database
+          image: busybox
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Attente de billing-database-service:{{ .Values.database.service.port }}..."
+              until nc -z billing-database-service {{ .Values.database.service.port }}; do
+                sleep 3
+              done
+              echo "PostgreSQL prêt."
+        - name: wait-for-rabbitmq
+          image: busybox
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Attente de rabbitmq-service:{{ .Values.rabbitmq.service.amqpPort }}..."
+              until nc -z rabbitmq-service {{ .Values.rabbitmq.service.amqpPort }}; do
+                sleep 3
+              done
+              echo "RabbitMQ prêt."
+      containers:
+        - name: billing-app
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.app.service.port }}
+          envFrom:
+            - secretRef:
+                name: billing-db-credentials
+            - configMapRef:
+                name: billing-db-config
+            - secretRef:
+                name: rabbitmq-credentials
+            - configMapRef:
+                name: rabbitmq-config
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.path }}
+              port: {{ .Values.app.probes.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3

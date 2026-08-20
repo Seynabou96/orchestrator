@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-database-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: inventory-database
+    component: service
+spec:
+  selector:
+    app: inventory-database
+  ports:
+    - name: postgres
+      port: {{ .Values.database.service.port }}
+      targetPort: {{ .Values.database.service.port }}
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: inventory-database
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: inventory-database
+spec:
+  serviceName: "inventory-database-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-database
+  template:
+    metadata:
+      labels:
+        app: inventory-database
+    spec:
+      initContainers:
+        # UID/GID du user postgres détecté au runtime, PAS codé en dur :
+        # l'UID exact créé par `apt-get install postgresql-15` sur
+        # debian:bookworm-slim n'est pas garanti par Debian (dépend de
+        # l'ordre d'attribution interne d'apt au moment du build).
+        - name: fix-volume-permissions
+          image: "{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+          command: ["sh", "-c"]
+          args:
+            - |
+              PG_UID=$(id -u postgres)
+              PG_GID=$(id -g postgres)
+              echo "postgres UID=$PG_UID GID=$PG_GID"
+              chown -R "$PG_UID:$PG_GID" /var/lib/postgresql/data
+              chmod 700 /var/lib/postgresql/data
+          volumeMounts:
+            - name: inventory-db-storage
+              mountPath: /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: inventory-database
+          image: "{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+          imagePullPolicy: {{ .Values.database.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.database.service.port }}
+          volumeMounts:
+            - name: inventory-db-storage
+              mountPath: /var/lib/postgresql/data
+          envFrom:
+            - secretRef:
+                name: inventory-db-credentials
+            - configMapRef:
+                name: inventory-db-config
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: INVENTORY_DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: INVENTORY_DB_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: inventory-db-config
+                  key: POSTGRES_DB
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            failureThreshold: 40
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: inventory-db-storage
+        labels:
+          app: inventory-database
+          component: storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.database.storage.size }}
+        storageClassName: {{ .Values.database.storage.storageClassName | quote }}
