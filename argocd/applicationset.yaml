@@ -1,0 +1,59 @@
+# =============================================================================
+# ApplicationSet — Orchestrator
+#
+# Utilise le Git Directory generator : ArgoCD scanne automatiquement
+# chaque sous-dossier de charts/ qui contient un Chart.yaml, et crée
+# une Application ArgoCD pour chacun.
+#
+# Résultat : 4 Applications générées automatiquement :
+#   - inventory  → namespace inventory
+#   - billing    → namespace billing
+#   - api-gateway → namespace api-gateway
+#   - monitoring → namespace monitoring
+#
+# Sync : MANUEL — ArgoCD détecte les diffs mais n'applique rien sans
+# validation explicite (make argocd-sync ou bouton Sync dans l'UI).
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: orchestrator
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/Seynabou96/orchestrator.git
+        revision: HEAD
+        directories:
+          - path: charts/*
+  template:
+    metadata:
+      # Le nom de l'Application = nom du dossier (inventory, billing, etc.)
+      name: "{{path.basename}}"
+      namespace: argocd
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Seynabou96/orchestrator.git
+        targetRevision: HEAD
+        path: "{{path}}"
+        helm:
+          # Utilise values.yaml par défaut (K3s)
+          # Pour EKS plus tard : ajouter values-eks.yaml ici
+          valueFiles:
+            - values.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        # Le namespace est déduit du nom du chart — doit correspondre
+        # à la valeur "namespace:" dans chaque values.yaml
+        namespace: "{{path.basename}}"
+      syncPolicy:
+        # Sync MANUEL : ArgoCD détecte les diffs mais n'applique rien
+        # sans validation explicite.
+        # Pour activer le sync automatique, décommenter :
+        # automated:
+        #   prune: true
+        #   selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
