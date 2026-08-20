@@ -1,101 +1,118 @@
 #!/bin/bash
-
-# Script de provisionnement pour le master K3s
-# provision-master.sh
-
 set -e
 
 echo "=== Configuration du Master K3s ==="
 
-# Configuration des variables
 MASTER_IP="192.168.56.10"
 AGENT_IP="192.168.56.11"
+K3S_VERSION="v1.36.2+k3s1"
+K3S_LOCAL_BIN="/vagrant/k3s-bin/k3s"
 
-# Mise à jour du système
 echo "Mise à jour du système..."
 apt-get update -y
 
-# Configuration des hosts
 echo "Configuration des hosts..."
-cat >> /etc/hosts <<EOF
+cat >> /etc/hosts <<HOSTS
 ${MASTER_IP} master
 ${AGENT_IP} agent
-EOF
+HOSTS
 
-# Configuration DNS pour éviter les problèmes systemd-resolved
 echo "Configuration DNS..."
 systemctl stop systemd-resolved 2>/dev/null || true
 systemctl disable systemd-resolved 2>/dev/null || true
 unlink /etc/resolv.conf 2>/dev/null || true
-
-cat > /etc/resolv.conf <<EOF
+cat > /etc/resolv.conf <<RESOLV
 nameserver 8.8.8.8
 nameserver 1.1.1.1
 search cluster.local
-EOF
-
-# Protection du fichier resolv.conf
+RESOLV
 chattr +i /etc/resolv.conf
 
-# Installation de K3s Master avec configuration réseau explicite
 echo "Installation de K3s Master..."
-# Ajoutez cette ligne AVANT l'installation de K3s
-echo "Détection de l'interface réseau..."
-HOST_ONLY_INTERFACE=$(ip addr show | grep "192.168.56." | awk '{print $NF}' | head -1)
-echo "Interface host-only détectée: $HOST_ONLY_INTERFACE"
 
-# Puis utilisez-la dans la commande K3s
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="\
+INSTALL_K3S_EXEC_FLAGS="\
   --write-kubeconfig-mode 644 \
   --node-ip ${MASTER_IP} \
   --advertise-address ${MASTER_IP} \
   --bind-address ${MASTER_IP} \
-  --cluster-init \
+  --node-name master \
   --disable traefik \
-  --flannel-iface=$HOST_ONLY_INTERFACE" sh -    # ← Utilise l'interface détectée
+  --disable-kube-proxy \
+  --flannel-backend=none \
+  --disable-network-policy"
 
-# Attendre que K3s soit prêt
-echo "Attente du démarrage de K3s..."
-sleep 10
+if [ -f "${K3S_LOCAL_BIN}" ]; then
+    # Binaire pré-téléchargé présent (ex: réseau avec débit CDN GitHub insuffisant)
+    # -> on saute le téléchargement, méthode air-gap officielle k3s.
+    echo "Binaire local détecté (${K3S_LOCAL_BIN}) -> installation sans téléchargement."
+    curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
+    chmod +x /tmp/k3s-install.sh
+    install -o root -g root -m 0755 "${K3S_LOCAL_BIN}" /usr/local/bin/k3s
 
-# Vérifier que K3s fonctionne
-until kubectl get nodes &>/dev/null; do
-    echo "Attente de la disponibilité de K3s..."
+    INSTALL_K3S_SKIP_DOWNLOAD=true \
+    INSTALL_K3S_SKIP_START=true \
+    INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC_FLAGS}" /tmp/k3s-install.sh
+else
+    # Chemin par défaut : téléchargement direct (fonctionne pour la plupart des réseaux).
+    # Voir docs/troubleshooting/POSTMORTEM.md #13 si ça bloque/traîne sur ce téléchargement :
+    # placer un binaire dans ./k3s-bin/k3s (voir README) pour passer en mode local.
+    echo "Pas de binaire local -> téléchargement via get.k3s.io."
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_VERSION="${K3S_VERSION}" \
+      INSTALL_K3S_SKIP_START=true \
+      INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC_FLAGS}" sh -
+fi
+
+echo "Démarrage du service k3s..."
+systemctl start k3s
+
+echo "Attente de l'écriture du token et du kubeconfig par k3s..."
+timeout=120
+counter=0
+until [ -s /var/lib/rancher/k3s/server/node-token ] && [ -s /etc/rancher/k3s/k3s.yaml ]; do
+    if [ $counter -gt $timeout ]; then
+        echo "ERREUR: token/kubeconfig non écrits après ${timeout}s"
+        journalctl -u k3s -n 30 --no-pager || true
+        exit 1
+    fi
+    echo "Attente token/kubeconfig... ($counter/${timeout}s)"
     sleep 5
+    counter=$((counter + 5))
 done
+echo "Token et kubeconfig présents."
 
-echo "K3s Master démarré avec succès"
-
-# Sauvegarder le token pour l'agent
 echo "Sauvegarde du token..."
-cat /var/lib/rancher/k3s/server/node-token > /vagrant/node-token
+cp /var/lib/rancher/k3s/server/node-token /vagrant/node-token
 
-# Copier la config kubectl pour l'hôte
 echo "Préparation de la config kubectl..."
-# Copier le kubeconfig pour kubectl
 cp /etc/rancher/k3s/k3s.yaml /vagrant/kubeconfig
-# Mettre à jour l'IP dans le kubeconfig
 sed -i "s/127.0.0.1/${MASTER_IP}/g" /vagrant/kubeconfig
 
-# Vérifier l'état du cluster
-echo "État du cluster:"
-kubectl get nodes -o wide
+echo "État du cluster (NotReady normal — Cilium pas encore installé) :"
+kubectl get nodes -o wide || true
 
-# Installer quelques outils utiles
-echo "Installation d'outils complémentaires..."
+# -----------------------------------------------------------------------------
+# Préchargement des images Cilium (si présentes) — évite de re-pull depuis
+# quay.io à chaque destroy/up sur un réseau à débit limité.
+# Voir docs/troubleshooting/POSTMORTEM.md #13/#14.
+# -----------------------------------------------------------------------------
+CILIUM_IMAGES_DIR="/vagrant/cilium-images"
+if [ -d "${CILIUM_IMAGES_DIR}" ] && ls "${CILIUM_IMAGES_DIR}"/*.tar &>/dev/null; then
+    echo "Images Cilium locales détectées -> import direct dans containerd."
+    for tarfile in "${CILIUM_IMAGES_DIR}"/*.tar; do
+        echo "  Import: ${tarfile}"
+        k3s ctr images import "${tarfile}"
+    done
+else
+    echo "Pas d'images Cilium locales -> elles seront tirées depuis quay.io par Helm (peut être lent, voir POSTMORTEM #13/#14)."
+fi
+
 apt-get install -y curl wget git nano htop
 
-# Afficher des informations utiles
 echo ""
 echo "=== Master K3s configuré avec succès ==="
 echo "IP Master: ${MASTER_IP}"
 echo "Token sauvé dans: /vagrant/node-token"
 echo "Config kubectl sauvée dans: /vagrant/kubeconfig"
 echo ""
-echo "Commandes utiles sur le master:"
-echo "  kubectl get nodes"
-echo "  kubectl get pods -A"
-echo "  kubectl cluster-info"
-echo ""
-
 echo "=== Provisionnement Master terminé ==="

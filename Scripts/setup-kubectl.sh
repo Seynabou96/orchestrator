@@ -65,24 +65,38 @@ cp ./kubeconfig ~/.kube/config
 chmod 600 ~/.kube/config
 
 # Tester la connexion
+# IMPORTANT (corrigé une 2e fois) : ce n'est PAS un problème de CNI —
+# vérifié concrètement : "kubectl get --raw /readyz" peut échouer
+# pendant une courte fenêtre de démarrage normale de l'apiserver
+# lui-même (poststarthooks internes : generic-apiserver-start-informers,
+# priority-and-fairness-*, start-apiextensions-*, etc. — rien à voir
+# avec le réseau pod). Un seul essai sans attendre était insuffisant ;
+# il faut une vraie boucle de retry, comme déjà fait dans
+# install-cluster-tools.sh.
 echo "Test de la connexion au cluster..."
-if kubectl cluster-info &>/dev/null; then
-    echo "✅ Connexion au cluster réussie !"
-    echo ""
-    echo "=== Informations du cluster ==="
-    kubectl cluster-info
-    echo ""
-    echo "=== Nœuds du cluster ==="
-    kubectl get nodes -o wide
-    echo ""
-    echo "=== Pods système ==="
-    kubectl get pods -n kube-system
-    echo ""
-else
-    echo "❌ Échec de la connexion au cluster"
-    echo "Vérifiez que les VMs sont bien démarrées avec 'vagrant status'"
-    exit 1
-fi
+timeout=180
+counter=0
+until kubectl get --raw='/readyz' &>/dev/null; do
+    if [ $counter -gt $timeout ]; then
+        echo "❌ Échec de la connexion au cluster après ${timeout}s"
+        echo "Détail de l'erreur :"
+        kubectl get --raw='/readyz' || true
+        echo "Vérifiez que les VMs sont bien démarrées avec 'vagrant status'"
+        exit 1
+    fi
+    echo "Attente de l'apiserver... ($counter/$timeout)"
+    sleep 5
+    counter=$((counter + 5))
+done
+
+echo "✅ API server accessible !"
+echo ""
+echo "=== Nœuds du cluster (NotReady normal sans CNI à ce stade) ==="
+kubectl get nodes -o wide || true
+echo ""
+echo "ℹ️  Les nœuds passeront Ready après l'installation de Cilium"
+echo "   (Scripts/install-cluster-tools.sh, déjà enchaîné par 'make create')."
+echo ""
 
 # Installer kubectl completion si bash est utilisé
 if [[ $SHELL == *"bash"* ]]; then
