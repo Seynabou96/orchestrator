@@ -1,0 +1,180 @@
+version: "3.9"
+
+# =============================================================================
+# docker-compose.yml — orchestration complète des 6 services.
+#
+# Noms de services IMPOSÉS littéralement par le sujet (vérifié contre le
+# texte) : inventory-db, billing-db, inventory-app, billing-app,
+# rabbit-queue, api-gateway-app. Le nom du service ET le nom de l'image
+# doivent être identiques ("The corresponding service and Docker image
+# must share the same name").
+#
+# Exigence critique du sujet : "Any outside request must be able to
+# access only the api-gateway-app via port 3000." — inventory-app et
+# billing-app ne doivent JAMAIS exposer de port à l'hôte (pas de
+# "ports:" pour eux), seulement être joignables via le réseau Docker
+# interne (expose: les déclare au réseau interne sans les publier sur
+# l'hôte). Avant cette version, inventory-app/billing-app exposaient
+# 8080/8081 à l'hôte — violation directe, corrigée ici.
+#
+# Remplace les boucles d'attente manuelles (wait-inventory-db, etc. dans
+# Makefile.docker) par le mécanisme natif Compose : depends_on avec
+# condition: service_healthy.
+#
+# Chaîne de dépendances :
+#   inventory-db  ──┐
+#                    ├─► inventory-app ──┐
+#   billing-db    ──┤                    ├─► api-gateway-app
+#   rabbit-queue  ──┴─► billing-app ─────┘
+# =============================================================================
+
+networks:
+  app-network:
+    name: play-with-containers-network
+
+volumes:
+  # Noms de volumes imposés par le sujet : "inventory-db volume",
+  # "billing-db volume", "api-gateway-app volume" (pour les logs).
+  inventory-db:
+    name: inventory-db-data
+  billing-db:
+    name: billing-db-data
+  rabbitmq-data:
+    name: rabbitmq-data
+  api-gateway-app:
+    name: api-gateway-app-logs
+
+services:
+
+  inventory-db:
+    build: ./srcs/inventory-database
+    image: inventory-db
+    container_name: inventory-db
+    networks:
+      - app-network
+    environment:
+      POSTGRES_USER: ${INVENTORY_DB_USER}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD}
+      POSTGRES_DB: ${INVENTORY_DB_NAME}
+    volumes:
+      - inventory-db:/var/lib/postgresql/data
+    restart: on-failure
+    # Port 5432 exigé "accessible" par le sujet, mais le sujet exige
+    # AUSSI que seul api-gateway-app soit joignable depuis l'extérieur.
+    # "Accessible via port 5432" est satisfait par l'exposition au
+    # réseau Docker interne (les autres services y accèdent par ce
+    # port) — exposer ce port à l'HÔTE serait contraire à la règle
+    # "Any outside request must be able to access only api-gateway-app".
+    expose:
+      - "5432"
+
+  billing-db:
+    build: ./srcs/billing-database
+    image: billing-db
+    container_name: billing-db
+    networks:
+      - app-network
+    environment:
+      POSTGRES_USER: ${BILLING_DB_USER}
+      POSTGRES_PASSWORD: ${BILLING_DB_PASSWORD}
+      POSTGRES_DB: ${BILLING_DB_NAME}
+    volumes:
+      - billing-db:/var/lib/postgresql/data
+    restart: on-failure
+    expose:
+      - "5432"
+
+  rabbit-queue:
+    build: ./srcs/rabbitMQ
+    image: rabbit-queue
+    container_name: rabbit-queue
+    networks:
+      - app-network
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: on-failure
+    expose:
+      - "5672"
+      - "15672"
+
+  inventory-app:
+    build: ./srcs/inventory-app
+    image: inventory-app
+    container_name: inventory-app
+    networks:
+      - app-network
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+    environment:
+      INVENTORY_DB_HOST: inventory-db
+      INVENTORY_DB_PORT: "5432"
+      INVENTORY_DB_NAME: ${INVENTORY_DB_NAME}
+      INVENTORY_DB_USER: ${INVENTORY_DB_USER}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD}
+      INVENTORY_APP_PORT: "8080"
+    restart: on-failure
+    # "accessible via port 8080" = sur le réseau interne, pour
+    # api-gateway-app. PAS exposé à l'hôte (cf. règle gateway unique).
+    expose:
+      - "8080"
+
+  billing-app:
+    build: ./srcs/billing-app
+    image: billing-app
+    container_name: billing-app
+    networks:
+      - app-network
+    depends_on:
+      billing-db:
+        condition: service_healthy
+      rabbit-queue:
+        condition: service_healthy
+    environment:
+      BILLING_DB_HOST: billing-db
+      BILLING_DB_PORT: "5432"
+      BILLING_DB_NAME: ${BILLING_DB_NAME}
+      BILLING_DB_USER: ${BILLING_DB_USER}
+      BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD}
+      RABBITMQ_HOST: rabbit-queue
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      BILLING_APP_PORT: "8080"
+    restart: on-failure
+    expose:
+      - "8080"
+
+  api-gateway-app:
+    build: ./srcs/api-gateway
+    image: api-gateway-app
+    container_name: api-gateway-app
+    networks:
+      - app-network
+    depends_on:
+      inventory-app:
+        condition: service_healthy
+      rabbit-queue:
+        condition: service_healthy
+    environment:
+      INVENTORY_APP_HOST: inventory-app
+      INVENTORY_APP_PORT: "8080"
+      RABBITMQ_HOST: rabbit-queue
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      GATEWAY_APP_PORT: "3000"
+    volumes:
+      # Volume de logs exigé par le sujet ("api-gateway-app volume
+      # contains your API gateway logs"). Monté sur /app/logs — voir
+      # app/__init__.py pour le handler de logging fichier ajouté en
+      # complément du logging stdout existant (les deux coexistent :
+      # stdout pour `docker logs`, fichier pour persistance/volume).
+      - api-gateway-app:/app/logs
+    restart: on-failure
+    # SEUL service exposé à l'hôte — exigence explicite du sujet.
+    ports:
+      - "3000:3000"

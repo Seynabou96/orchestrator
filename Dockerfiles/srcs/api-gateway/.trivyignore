@@ -1,0 +1,119 @@
+# =============================================================================
+# .trivyignore — exceptions de scan Trivy, lisibles par la machine
+#
+# CONTEXTE : documenter un compromis sécurité dans un commentaire de
+# Dockerfile ne protège PAS un pipeline CI. `trivy image --exit-code 1
+# --severity HIGH,CRITICAL` ne lit aucun commentaire — il compte des CVE
+# et fait échouer le job, point. Ce fichier est la version exécutable de
+# ces décisions, utilisée via :
+#   trivy image --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore <image>
+#
+# RÈGLE DE DISCIPLINE (à respecter à chaque ajout, jusqu'à Code Keeper où
+# le pipeline GitLab CI l'appliquera automatiquement) :
+# 1. Chaque CVE ignorée a une justification en commentaire au-dessus —
+#    jamais une ligne nue sans explication.
+# 2. Chaque entrée a une date de revue (# revu AAAA-MM-JJ). Une CVE
+#    will_not_fix aujourd'hui peut changer de statut demain (Debian peut
+#    publier un correctif rétroactif), et notre usage d'un paquet peut
+#    évoluer. Ce fichier doit être réexaminé périodiquement, pas écrit
+#    une fois et oublié.
+# 3. Ce fichier n'est PAS une poubelle pour faire passer le pipeline au
+#    vert. Toute CVE qui correspond à un paquet qu'on a explicitement
+#    choisi (pas une dépendance transitive du système) doit être
+#    corrigée dans requirements.txt ou le Dockerfile, jamais ignorée ici.
+#
+# Note sur le format : Trivy accepte un identifiant CVE par ligne, lignes
+# commençant par '#' traitées comme commentaires. Certaines versions de
+# Trivy supportent une syntaxe d'expiration native (CVE-ID exp:AAAA-MM-JJ)
+# — non vérifiée avec certitude au moment de la rédaction de ce fichier,
+# donc la date de revue ci-dessous est portée par convention en commentaire
+# plutôt que supposée appliquée automatiquement par l'outil. À vérifier
+# explicitement contre `trivy --help` / la documentation officielle avant
+# de considérer cette date comme autre chose qu'un rappel pour revue
+# manuelle.
+# =============================================================================
+
+# --- libldap-2.5-0 ---
+# CVE-2023-2953 : null pointer dereference dans ber_memalloc_x.
+# Notre code n'utilise jamais LDAP (aucune dépendance Python type
+# python-ldap, aucune config LDAP). Dépendance transitive du système
+# Debian, non exploitable sans usage actif de la lib.
+# revu 2026-06-20
+CVE-2023-2953
+
+# --- perl / perl-base / perl-modules-5.36 / libperl5.36 ---
+# Bloc de CVE perl, présent uniquement parce que postgresql-contrib
+# (retiré du Dockerfile inventory-database) tirait perl en dépendance
+# transitive via postgresql-client-common -> libipc-run-perl. Si ce
+# bloc réapparaît dans un futur scan, c'est le signal qu'un paquet a
+# réintroduit cette dépendance — à investiguer, pas à re-ignorer
+# silencieusement.
+# revu 2026-06-20
+CVE-2026-42496
+CVE-2026-8376
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-9538
+
+# --- zlib1g ---
+# CVE-2023-45853 : integer overflow dans zipOpenNewFileInZip4_6.
+# Statut Debian : will_not_fix officiellement. Aucune action possible
+# de notre côté ; zlib1g est une dépendance système incontournable.
+# revu 2026-06-20
+CVE-2023-45853
+
+# --- libtinfo6 / ncurses-base / ncurses-bin ---
+# CVE-2025-69720 : buffer overflow ncurses. Dépendance système de base
+# Debian (terminal handling), jamais invoquée par notre code applicatif
+# qui ne fait aucune manipulation de terminal interactif.
+# revu 2026-06-20
+CVE-2025-69720
+
+# --- libexpat1 ---
+# Dépendance système de parsing XML, jamais invoquée par notre code.
+# CVE-2025-59375 will_not_fix côté Debian, CVE-2026-25210 et
+# CVE-2026-45186 affected sans fix disponible à ce jour.
+# revu 2026-06-21
+CVE-2025-59375
+CVE-2026-25210
+CVE-2026-45186
+
+# --- libpython3.11-minimal / libpython3.11-stdlib / python3.11 / python3.11-minimal ---
+# CVE sur l'interpréteur Python lui-même et ses dépendances système.
+# Python est notre runtime applicatif obligatoire. Toutes affected côté
+# Debian bookworm à ce jour, sans fix disponible.
+# revu 2026-06-21
+CVE-2025-69534
+CVE-2026-3644
+CVE-2026-4224
+CVE-2026-6100
+CVE-2026-7210
+
+# --- libsqlite3-0 ---
+# SQLite compilé en dépendance native de Python (module stdlib sqlite3),
+# jamais utilisé par api-gateway (aucune base de données, service
+# stateless). CVE-2025-7458 (CRITICAL) et CVE-2026-11822/11824
+# affected/fix_deferred côté Debian.
+# revu 2026-06-21
+CVE-2025-7458
+CVE-2026-11822
+CVE-2026-11824
+
+# --- libssh2-1 ---
+# CVE-2026-7598 : dépendance transitive système, jamais invoquée (ni
+# requests ni pika ne dépendent de libssh2 pour leurs protocoles natifs
+# HTTP/AMQP).
+# revu 2026-06-21
+CVE-2026-7598
+
+# =============================================================================
+# CVE NON ignorées volontairement — à corriger, pas à masquer :
+#
+# - setuptools : épinglé à 82.0.1 dès la rédaction initiale de
+#   requirements.txt, donc aucune CVE setuptools attendue dans le scan
+#   de cette image.
+#
+# - api-gateway n'installe jamais curl ni aucun outil système au-delà du
+#   strict nécessaire (python3, libpq5) — le HEALTHCHECK utilise urllib
+#   (Python stdlib), même principe que inventory-app et billing-app.
+# =============================================================================

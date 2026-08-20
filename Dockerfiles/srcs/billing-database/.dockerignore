@@ -1,0 +1,8 @@
+# Ce Dockerfile copie entrypoint.sh nommément (COPY entrypoint.sh
+# /entrypoint.sh), pas COPY . . — ce .dockerignore est donc une mesure
+# de précaution, pas une nécessité actuelle. Il protège si jamais le
+# Dockerfile est modifié vers un COPY . . sans qu'on y repense.
+.trivyignore
+trivy-secret.yaml
+*.md
+.git/

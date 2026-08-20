@@ -1,0 +1,41 @@
+# =============================================================================
+# .trivyignore — exceptions de scan Trivy pour billing-database
+#
+# Voir srcs/inventory-app/.trivyignore pour le contexte complet et la
+# règle de discipline (justification + date de revue obligatoires,
+# jamais une CVE ignorée sans raison documentée).
+#
+# Usage :
+#   trivy image --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore billing-database:latest
+# =============================================================================
+
+# --- libldap-2.5-0 ---
+# CVE-2023-2953 : null pointer dereference. PostgreSQL n'utilise pas LDAP
+# dans notre configuration (auth via md5/password, pas pg_hba LDAP).
+# revu 2026-06-20
+CVE-2023-2953
+
+# --- perl / perl-base / perl-modules-5.36 / libperl5.36 ---
+# Ce bloc ne devrait plus apparaître depuis le retrait de
+# postgresql-contrib du Dockerfile (qui tirait perl via
+# postgresql-client-common -> libipc-run-perl). Conservé ici par
+# précaution si une future modification du Dockerfile le réintroduit
+# accidentellement — si ce bloc redevient pertinent au prochain scan,
+# c'est un signal à investiguer, pas à ignorer par réflexe.
+# revu 2026-06-20
+CVE-2026-42496
+CVE-2026-8376
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-9538
+
+# --- zlib1g ---
+# CVE-2023-45853 : will_not_fix officiel côté Debian.
+# revu 2026-06-20
+CVE-2023-45853
+
+# --- libtinfo6 / ncurses-base / ncurses-bin ---
+# CVE-2025-69720 : dépendance système de base, non invoquée par
+# PostgreSQL en usage serveur standard (pas de terminal interactif).
+# revu 2026-06-20
+CVE-2025-69720

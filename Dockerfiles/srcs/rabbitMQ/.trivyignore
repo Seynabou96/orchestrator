@@ -1,0 +1,54 @@
+# =============================================================================
+# .trivyignore — exceptions de scan Trivy pour rabbitMQ
+#
+# Voir srcs/inventory-app/.trivyignore pour le contexte complet et la
+# règle de discipline (justification + date de revue obligatoires).
+#
+# IMPORTANT : ce fichier est une base de départ, pas un résultat de scan
+# réel — RabbitMQ tire Erlang comme dépendance majeure (~15 paquets
+# erlang-*), jamais scanné encore sur cette image précise. À ajuster
+# avec les vraies CVE remontées par le premier `make scan-rabbitmq`,
+# pas à considérer comme complet avant ce scan.
+#
+# Usage :
+#   trivy image --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore rabbitmq:latest
+# =============================================================================
+
+# --- zlib1g ---
+# CVE-2023-45853 : will_not_fix officiel côté Debian. Constatée sur
+# inventory-app et inventory-database, dépendance système quasi
+# systématique sur debian:bookworm-slim.
+# revu 2026-06-21
+CVE-2023-45853
+
+# --- libtinfo6 / ncurses-base / ncurses-bin ---
+# CVE-2025-69720 : dépendance système de base, non invoquée par
+# RabbitMQ en usage serveur standard.
+# revu 2026-06-21
+CVE-2025-69720
+
+# --- erlang-* (erlang-base, erlang-crypto, erlang-ssl, etc.) ---
+# RabbitMQ est écrit en Erlang et a une dépendance OBLIGATOIRE et
+# incontournable sur le runtime Erlang OTP — il n'existe aucune
+# alternative : pas d'option pour faire tourner RabbitMQ sans Erlang,
+# et l'image officielle rabbitmq: (qui gérerait peut-être différemment
+# cette dépendance) est explicitement interdite par le sujet Play with
+# Containers. Ces 3 CVE sont 'affected' sans fix disponible côté Debian
+# bookworm à ce jour (paquet erlang 1:25.2.3+dfsg-1+deb12u4).
+# revu 2026-06-21
+CVE-2026-28808
+CVE-2026-42790
+CVE-2026-49759
+
+# =============================================================================
+# IMPORTANT — honnêteté sur ce qui reste à vérifier :
+# Un scan réel a remonté 82 CVE au total sur cette image, dont un bloc
+# erlang-* de 14 paquets. Les 3 CVE ci-dessus (citées explicitement lors
+# de l'analyse de ce scan) couvrent 14 paquets x 3 CVE = 42 lignes du
+# rapport, mais PAS la totalité des 82. Le reste recouvre probablement
+# zlib1g/ncurses déjà listées plus haut, mais ce n'est pas vérifié avec
+# certitude — il manque potentiellement d'autres CVE non identifiées
+# dans ce fichier. NE PAS considérer ce .trivyignore comme complet :
+# relancer `make scan-rabbitmq` et comparer ligne par ligne avec ce
+# fichier avant de faire confiance à un exit-code 0.
+# =============================================================================
