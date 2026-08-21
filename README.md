@@ -6,6 +6,16 @@ Déploiement d'une architecture microservices sur K3s, packagé en charts Helm, 
 
 `charts/` est la **seule source de vérité**. Le dossier `Manifests/` est **périmé** (archive de l'avant-Helm), ne pas l'utiliser.
 
+## 🚧 État actuel
+
+Le cœur du projet (K3s, Cilium, charts `inventory`/`billing`/`api-gateway`, Sealed Secrets, Prometheus/Grafana) est fonctionnel. Trois éléments sont **en cours de correction** et pas garantis stables pour le moment :
+
+- **Loki** (logs) — pas encore fiable, en cours de debug.
+- **ArgoCD** — sync/installation en cours de correction.
+- **Kubernetes Dashboard** — en cours de correction.
+
+Ces sections sont documentées ci-dessous pour référence, mais à considérer comme **non disponibles** tant que ce bandeau n'a pas été retiré.
+
 ## 📦 Structure
 
 ```
@@ -87,7 +97,7 @@ make status
 | `make debug` | Historique Helm, valeurs effectives, manifests appliqués |
 | `make stop` | Désinstalle les apps (garde les VMs) |
 | `make delete` | Détruit les VMs (`vagrant destroy`) |
-| `make dashboard` | Déploie/ouvre le Kubernetes Dashboard |
+| `make dashboard` | 🚧 Déploie/ouvre le Kubernetes Dashboard — en cours de correction, pas disponible pour le moment |
 
 ## 📊 Grafana
 
@@ -96,13 +106,15 @@ Pas d'Ingress pour Grafana (volontaire, pour rester simple). Accès :
 ```bash
 kubectl port-forward -n monitoring svc/monitoring-grafana 3001:80
 ```
-Puis ouvrir `http://localhost:3001` (user `admin`, mot de passe dans `charts/monitoring/values.yaml`, à changer avant tout usage réel). La datasource Loki (logs) est déjà connectée automatiquement.
+Puis ouvrir `http://localhost:3001` (user `admin`, mot de passe dans `charts/monitoring/values.yaml`, à changer avant tout usage réel). La datasource Loki (logs) est préconfigurée, mais voir la section 📜 Logs ci-dessous — pas fiable pour le moment.
 
 ⚠️ **Ne pas utiliser le port local 3000** : c'est celui d'`api-gateway` (voir `make test-smoke`). Un port-forward Grafana resté actif sur 3000 fait échouer silencieusement le test smoke avec des `401 Unauthorized` (c'est Grafana qui répond à la place de l'API) — déjà rencontré, voir `docs/troubleshooting/POSTMORTEM.md`.
 
-## 📜 Logs
+## 📜 Logs — 🚧 en cours de correction, pas disponible pour le moment
 
 Loki (mode Monolithic, stockage filesystem) + Grafana Alloy (DaemonSet, collecte les logs de tous les pods). Alloy remplace Promtail, EOL depuis le 2 mars 2026.
+
+**Statut** : la remontée des logs dans Grafana n'est pas encore fiable. À ne pas utiliser tel quel — mise à jour à venir une fois le bug identifié.
 
 ## 🔐 Secrets
 
@@ -118,11 +130,9 @@ Les credentials (DB, RabbitMQ) sont des **SealedSecret** (Bitnami), committables
 
 Chaque chart a un `values-eks.yaml` (override de `storageClassName`, etc.). Points à traiter côté Cloud Design, pas ici : EBS CSI driver (StorageClass), AWS Load Balancer Controller (ALB vs Ingress Cilium), activation NetworkPolicy sur le VPC CNI.
 
-## ❌ Non traité dans cette session
+## 🔄 ArgoCD (optionnel — complément à `make start`) — 🚧 en cours de correction, pas disponible pour le moment
 
-ArgoCD — gardé volontairement pour Code Keeper (comprendre Helm manuellement avant d'automatiser son déploiement).
-
-## 🔄 ArgoCD (optionnel — complément à `make start`)
+**Statut** : installation/sync pas encore stables. À ne pas utiliser tel quel — mise à jour à venir.
 
 ArgoCD ajoute la synchronisation GitOps par-dessus le déploiement Helm existant. Il surveille le repo GitHub et détecte les diffs entre ce qui est dans `charts/` et ce qui tourne dans le cluster — sans jamais appliquer quoi que ce soit sans ta validation (sync manuel).
 
